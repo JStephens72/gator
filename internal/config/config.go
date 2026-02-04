@@ -24,7 +24,7 @@ func Read() (Config, error) {
 		// if the file does not exist, create it with default values
 		if errors.Is(err, os.ErrNotExist) {
 			cfg := Config{
-				DbURL: "postgres://example",
+				DbURL: "postgres://postgres:postgres@localhost:5432/gator?sslmode=disable",
 			}
 
 			if err := write(cfg); err != nil {
@@ -53,7 +53,9 @@ func Read() (Config, error) {
 func (cfg *Config) SetUser(userName string) error {
 	cfg.CurrentUserName = userName
 
-	write(*cfg)
+	if err := write(*cfg); err != nil {
+		return err
+	}
 
 	return nil
 }
