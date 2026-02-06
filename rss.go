@@ -2,11 +2,17 @@ package main
 
 import (
 	"context"
+	"database/sql"
 	"encoding/xml"
 	"fmt"
 	"html"
 	"io"
 	"net/http"
+	"time"
+
+	"github.com/JStephens72/gator/internal/database"
+	"github.com/google/uuid"
+	"github.com/lib/pq"
 )
 
 type RSSFeed struct {
@@ -82,7 +88,75 @@ func scrapeFeeds(s *state) error {
 	}
 
 	for _, article := range feed.Channel.Item {
-		fmt.Printf("(%s) Title: %s\n", feed.Channel.Title, article.Title)
+		t, err := parsePubDate(article.PubDate)
+		var pubTime sql.NullTime
+		if err == nil {
+			pubTime = sql.NullTime{Time: t, Valid: true}
+		} else {
+			pubTime = sql.NullTime{Valid: false}
+		}
+
+		params := database.AddPostParams{
+			ID:          uuid.New(),
+			CreatedAt:   time.Now(),
+			UpdatedAt:   time.Now(),
+			Title:       stringToNs(article.Title),
+			Url:         article.Link,
+			Description: stringToNs(article.Description),
+			PublishedAt: pubTime,
+			FeedID:      feedInfo.ID,
+		}
+
+		if _, err := s.db.AddPost(context.Background(), params); err != nil {
+			if isUniqueViolation(err) { //duplicate URL
+				continue
+			}
+			return fmt.Errorf("error inserting post into database: %w", err)
+		}
 	}
 	return nil
+}
+
+func nsToString(ns sql.NullString) string {
+	if ns.Valid {
+		return ns.String
+	}
+	return ""
+}
+
+func stringToNs(s string) sql.NullString {
+	if s == "" {
+		return sql.NullString{Valid: false}
+	}
+	return sql.NullString{String: s, Valid: true}
+}
+
+func parsePubDate(s string) (time.Time, error) {
+	layouts := []string{
+		time.RFC1123Z,
+		time.RFC1123,
+		time.RFC822Z,
+		time.RFC822,
+		time.RFC3339,
+	}
+
+	var lastErr error
+	for _, layout := range layouts {
+		t, err := time.Parse(layout, s)
+		if err == nil {
+			return t, nil
+		}
+		lastErr = err
+	}
+	return time.Time{}, lastErr
+}
+
+func isUniqueViolation(err error) bool {
+	if pqErr, ok := err.(*pq.Error); ok {
+		if pqErr.Code == "23505" {
+			return true
+		}
+		return false
+	}
+	return false
 }

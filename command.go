@@ -3,6 +3,7 @@ package main
 import (
 	"context"
 	"fmt"
+	"strconv"
 	"time"
 
 	"github.com/JStephens72/gator/internal/database"
@@ -246,5 +247,51 @@ func handlerUnfollow(s *state, cmd command, currentUser database.User) error {
 	}
 
 	fmt.Printf("user %s stopped following '%s'", currentUser.Name, feed.Name)
+	return nil
+}
+
+func handlerBrowse(s *state, cmd command) error {
+	postLimit := int32(2) // default
+
+	if len(cmd.args) > 0 {
+		n, err := strconv.Atoi(cmd.args[0])
+		if err == nil && n > 0 {
+			postLimit = int32(n)
+		}
+	}
+
+	ctx := context.Background()
+	currentUser := s.cfg.CurrentUserName
+	u, err := s.db.GetUser(ctx, currentUser)
+	if err != nil {
+		return fmt.Errorf("error retrieving current user: %w", err)
+	}
+
+	params := database.GetPostsForUserParams{
+		UserID: u.ID,
+		Limit:  postLimit,
+	}
+
+	userPosts, err := s.db.GetPostsForUser(ctx, params)
+	if err != nil {
+		return fmt.Errorf("error getting posts for user '%s': %w", currentUser, err)
+	}
+	for _, userPost := range userPosts {
+		title := nsToString(userPost.Title)
+		description := nsToString(userPost.Description)
+		dateStr := ""
+		if userPost.PublishedAt.Valid {
+			dateStr = userPost.PublishedAt.Time.Format(time.RFC822)
+		}
+
+		p := fmt.Sprintf(`Title: %v
+Link: %v
+Description: %v
+Published: %s
+
+`, title, userPost.Url, description, dateStr)
+		fmt.Print(p)
+	}
+
 	return nil
 }
